@@ -59,17 +59,28 @@ async function depuisOpenLibrary(isbn13, signal) {
 const ROLES =
   'Auteur|Traducteur|Illustrateur|Éditeur|Editeur|Préfacier|Directeur|Compositeur|Photographe|Adaptateur|Narrateur|Annotateur|Collaborateur|Autre';
 
-/** "Tolkien, John Ronald Reuel (1892-1973). Auteur du texte" -> "John Ronald Reuel Tolkien" */
-function nettoyerAuteurBnf(vedette) {
-  const sansRole = vedette
-    .replace(/\s*\(\d{4}-?\d{0,4}\.{0,4}\??\)/g, '')
+// Les dates de vie prennent des formes tres libres — "(1892-1973)",
+// "(1963-....)", "(0551?-0478? av. J.-C.)" — qu'aucun motif chiffre precis ne
+// couvre. On retire donc toute parenthese contenant un chiffre : dans une
+// vedette d'autorite, il ne s'y trouve rien d'autre que des dates.
+const sansDates = (texte) => texte.replace(/\s*\([^)]*\d[^)]*\)/g, '');
+
+/** "Sun Tzu (0551?-0478? av. J.-C.). Auteur du texte" -> "Sun Tzu" */
+const sansDatesNiRole = (vedette) =>
+  sansDates(vedette)
     .replace(new RegExp(`\\.\\s*(${ROLES})\\b.*$`, 'i'), '')
     .trim()
     .replace(/[.,;]$/, '');
 
-  const [nom, prenom] = sansRole.split(/,\s*/);
-  return prenom ? `${prenom} ${nom}` : sansRole;
+/** "Tolkien, John Ronald Reuel (1892-1973). Auteur du texte" -> "John Ronald Reuel Tolkien" */
+function nettoyerAuteurBnf(vedette) {
+  const nomComplet = sansDatesNiRole(vedette);
+  const [nom, prenom] = nomComplet.split(/,\s*/);
+  return prenom ? `${prenom} ${nom}` : nomComplet;
 }
+
+/** Element de classement de la vedette, seul repere fiable dans le titre. */
+const patronymeBnf = (vedette) => sansDatesNiRole(vedette).split(',')[0].trim();
 
 /**
  * Le dc:title de la BnF agglomere le titre, la mention d'edition et la mention
@@ -84,26 +95,43 @@ function nettoyerTitreBnf(titre, vedettes) {
 
   if (!coupe) {
     for (const vedette of vedettes) {
-      const patronyme = vedette.split(',')[0].trim();
-      const position = patronyme.length > 2 ? propre.indexOf(patronyme) : -1;
-      // Une coupe en tete de chaine signifierait que le patronyme est le titre.
-      if (position > 2) {
-        propre = propre.slice(0, position);
-        coupe = true;
+      // Le nom complet d'abord : couper au seul patronyme laisserait le prenom
+      // dans le titre ("Vernon Subutex. 1 (Nouv. éd.) Virginie").
+      for (const repere of [nettoyerAuteurBnf(vedette), patronymeBnf(vedette)]) {
+        const position = repere.length > 2 ? propre.indexOf(repere) : -1;
+        // Une coupe en tete de chaine signifierait que le repere est le titre.
+        if (position > 2) {
+          propre = propre.slice(0, position);
+          coupe = true;
+          break;
+        }
       }
     }
   }
 
-  // La coupe laisse derriere elle le prenom de l'auteur et la mention
-  // d'edition : "… de l'anneau (Nouv. présentation) J. R. R. "
-  let precedent = null;
-  while (propre !== precedent) {
-    precedent = propre;
-    propre = propre.trim().replace(/[\s;:,/]+$/, '');
-    if (coupe) propre = propre.replace(/(\s+\p{Lu}\.)+$/u, '');
-    propre = propre.replace(/\s*\([^)]*\)$/, '');
+  // Dernier recours : la BnF romanise parfois l'auteur autrement que la page de
+  // titre ("Sun zi" en vedette, "Sun Tzu" dans le titre). Le point-virgule
+  // separe les mentions de responsabilite entre elles, et ce qui suit la
+  // mention d'edition entre parentheses en fait partie.
+  if (!coupe && propre.includes(' ; ')) {
+    propre = propre.split(' ; ')[0].replace(/(\([^)]*\))\s+\S.*$/, '$1');
+    coupe = true;
   }
-  return propre;
+
+  // La coupe laisse derriere elle les initiales de l'auteur et la mention
+  // d'edition : "… de l'anneau (Nouv. présentation) J. R. R. ". Ce rabotage ne
+  // s'applique qu'aux titres effectivement coupes : sur un titre intact, une
+  // parenthese finale porte une information ("Les Misérables (tome 1)").
+  let precedent = null;
+  while (coupe && propre !== precedent) {
+    precedent = propre;
+    propre = propre
+      .trim()
+      .replace(/[\s;:,/]+$/, '')
+      .replace(/(\s+\p{Lu}\.)+$/u, '')
+      .replace(/\s*\([^)]*\)$/, '');
+  }
+  return propre.trim().replace(/[\s;:,/]+$/, '');
 }
 
 /** "Gallimard-Jeunesse (Paris)" -> "Gallimard-Jeunesse" */

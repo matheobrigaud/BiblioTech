@@ -336,9 +336,14 @@ async function rechercher(code) {
 
 // --- Ajout : fiche puis parcours ----------------------------------------
 
-function panneauFiche(livre, avertissement) {
+/**
+ * Formulaire des metadonnees, partage entre l'ajout et la correction.
+ * `suite` recoit le livre complete : enchainer sur le choix du parcours a
+ * l'ajout, ou enregistrer directement lors d'une correction.
+ */
+function panneauFiche(livre, avertissement, { suite = panneauParcours, libelle, titre: entete } = {}) {
   ouvrirPanneau(
-    `<h2>${livre.title ? 'Vérifier la fiche' : 'Nouveau livre'}</h2>
+    `<h2>${entete ?? (livre.title ? 'Vérifier la fiche' : 'Nouveau livre')}</h2>
      ${avertissement ? `<p class="note">${echapper(avertissement)}</p>` : ''}
      <label for="titre">Titre</label>
      <input id="titre" value="${echapper(livre.title)}">
@@ -356,7 +361,7 @@ function panneauFiche(livre, avertissement) {
      <p class="erreur" id="err" hidden></p>
      <div class="actions">
        <button class="secondaire" data-action="annuler">Annuler</button>
-       <button class="primaire" data-action="suite">Continuer</button>
+       <button class="primaire" data-action="suite">${libelle ?? 'Continuer'}</button>
      </div>`,
     (panneau) => {
       panneau.querySelector('[data-action="annuler"]').addEventListener('click', fermer);
@@ -370,7 +375,7 @@ function panneauFiche(livre, avertissement) {
         }
         const pages = parseInt(panneau.querySelector('#pages').value, 10);
         const genre = panneau.querySelector('#genre').value;
-        panneauParcours({
+        suite({
           ...livre,
           title: titre,
           authors: panneau
@@ -510,8 +515,11 @@ function panneauLivre(copieId) {
      }
 
      <div class="actions">
-       <button class="secondaire" data-action="supprimer">Supprimer</button>
+       <button class="secondaire" data-action="modifier">Modifier la fiche</button>
        <button class="primaire" data-action="fermer">Fermer</button>
+     </div>
+     <div class="actions">
+       <button class="secondaire" data-action="supprimer">Supprimer ce livre</button>
      </div>`,
     (panneau) => {
       panneau.querySelector('#statut').addEventListener('change', async (e) => {
@@ -544,6 +552,20 @@ function panneauLivre(copieId) {
         fermer();
         recharger();
       });
+
+      // Les notices de catalogue arrivent parfois mal formees : pouvoir les
+      // corriger apres coup evite de devoir supprimer puis ressaisir le livre.
+      panneau.querySelector('[data-action="modifier"]').addEventListener('click', () =>
+        panneauFiche(livre, null, {
+          titre: 'Modifier la fiche',
+          libelle: 'Enregistrer',
+          suite: async (modifie) => {
+            await db.enregistrer('books', modifie);
+            await recharger();
+            panneauLivre(copieId);
+          },
+        }),
+      );
 
       panneau.querySelector('[data-action="supprimer"]').addEventListener('click', async () => {
         if (!confirm(`Supprimer « ${livre.title} » et tout son historique ?`)) return;
