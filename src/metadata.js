@@ -130,7 +130,18 @@ export async function chercherParIsbn(saisie, { signal } = {}) {
   for (const fournisseur of [depuisOpenLibrary, depuisBnf]) {
     try {
       const fiche = await fournisseur(isbn13, signal);
-      if (fiche?.title) return { ...fiche, isbn13, isbn10: versIsbn10(isbn13) };
+      if (fiche?.title) {
+        return {
+          ...fiche,
+          isbn13,
+          isbn10: versIsbn10(isbn13),
+          // La BnF ne fournit pas de couverture : on retombe sur la
+          // photothèque d'Open Library, qui repond par ISBN. « default=false »
+          // renvoie une 404 plutot qu'une image blanche quand elle n'a rien,
+          // ce qui laisse l'interface afficher sa propre vignette.
+          coverUrl: fiche.coverUrl ?? `https://covers.openlibrary.org/b/isbn/${isbn13}-M.jpg?default=false`,
+        };
+      }
     } catch (err) {
       if (err.name === 'AbortError') throw err;
       // Un fournisseur injoignable ne doit pas empecher d'essayer le suivant.

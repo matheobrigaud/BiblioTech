@@ -28,6 +28,33 @@ const echapper = (valeur) =>
 
 const etoiles = (note) => (note ? '★'.repeat(note) + '☆'.repeat(5 - note) : '');
 
+const dateLongue = new Intl.DateTimeFormat('fr-FR', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+});
+
+const enDate = (iso) => (iso ? dateLongue.format(new Date(`${iso}T12:00:00`)) : '');
+
+/** Une ligne d'historique lisible, adaptee a l'etat de la lecture. */
+function resumerLecture(lecture) {
+  const details = [];
+  if (lecture.timesRead > 1) details.push(`lu ${lecture.timesRead} fois`);
+  if (lecture.rating) details.push(etoiles(lecture.rating));
+
+  let entete;
+  if (lecture.kind === 'historical') entete = 'Lu avant BiblioTech';
+  else if (lecture.abandonedAt)
+    entete =
+      `Abandonné le ${enDate(lecture.abandonedAt)}` +
+      (lecture.stoppedAtPage ? `, page ${lecture.stoppedAtPage}` : '');
+  else if (lecture.finishedAt)
+    entete = `Lu du ${enDate(lecture.startedAt)} au ${enDate(lecture.finishedAt)}`;
+  else entete = `Commencé le ${enDate(lecture.startedAt)}`;
+
+  return [entete, ...details].join(' · ');
+}
+
 async function recharger() {
   const [livres, exemplaires, lectures] = await Promise.all([
     db.tout('books'),
@@ -80,8 +107,12 @@ function dessiner() {
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
       return `<button class="livre" data-copie="${exemplaire.id}">
         ${
+          // Une couverture absente du fonds d'Open Library renvoie une 404 :
+          // on remplace alors l'image par la vignette de repli.
           livre.coverUrl
-            ? `<img class="couverture" src="${echapper(livre.coverUrl)}" alt="" loading="lazy">`
+            ? `<img class="couverture" src="${echapper(livre.coverUrl)}" alt="" loading="lazy"
+                    onerror="this.replaceWith(Object.assign(document.createElement('div'),
+                             { className: 'couverture', textContent: '📕' }))">`
             : '<div class="couverture">📕</div>'
         }
         <div>
@@ -425,14 +456,8 @@ function panneauLivre(copieId) {
        lectures.length
          ? `<label>Historique de lecture</label>${lectures
              .map(
-               (l) => `<p class="note">
-                 ${l.kind === 'historical' ? 'Avant BiblioTech' : l.startedAt}
-                 ${l.finishedAt ? ` → ${l.finishedAt}` : ''}
-                 ${l.abandonedAt ? ' · abandonné' : ''}
-                 ${l.timesRead > 1 ? ` · lu ${l.timesRead} fois` : ''}
-                 ${l.rating ? ` · ${etoiles(l.rating)}` : ''}
-                 ${l.comment ? `<br>${echapper(l.comment)}` : ''}
-               </p>`,
+               (l) => `<p class="note">${echapper(resumerLecture(l))}
+                 ${l.comment ? `<br>${echapper(l.comment)}` : ''}</p>`,
              )
              .join('')}`
          : ''

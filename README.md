@@ -52,6 +52,12 @@ python -m http.server 8000
 Puis <http://localhost:8000>. La caméra exige HTTPS, sauf sur `localhost` où
 elle est autorisée.
 
+L'application démarre vide. Pour voir à quoi elle ressemble remplie, ouvrir
+*Réglages → Importer* et choisir `demo/bibliotheque-exemple.json` : six livres
+couvrant tous les statuts, dont deux lectures antérieures sans date et une
+lecture abandonnée page 96. L'import fusionne sur les identifiants, il n'écrase
+donc pas une bibliothèque existante.
+
 ## Déployer sur GitHub Pages
 
 1. Créer un dépôt **public** (Pages n'est gratuit que sur les dépôts publics).

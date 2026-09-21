@@ -112,6 +112,12 @@ body {
   object-fit: cover;
   border-radius: 0.25rem;
   background: var(--bord);
+}
+
+/* Vignette de repli quand le livre n'a pas de couverture connue.
+   Le centrage ne doit viser que le <div> : applique a un <img>, display:grid
+   empeche l'image de se peindre. */
+div.couverture {
   display: grid;
   place-items: center;
   font-size: 1.25rem;
