@@ -1,9 +1,12 @@
 // Service worker : rend l'application utilisable hors ligne.
 //
-// Incrementer CACHE a chaque deploiement, sinon les telephones restent
-// bloques sur l'ancienne version.
+// Le reseau passe avant le cache pour les fichiers de l'application. C'est un
+// peu moins rapide au demarrage, mais ca rend impossible le scenario ou un
+// telephone reste bloque sur une ancienne version : on ne peut rien reparer a
+// distance, donc mieux vaut ne jamais servir de code perime tant qu'il y a du
+// reseau. Le cache reste la reserve hors ligne.
 
-const CACHE = 'bibliotech-v1';
+const CACHE = 'bibliotech-v2';
 
 const COQUILLE = [
   './',
@@ -57,14 +60,21 @@ self.addEventListener('fetch', (evt) => {
     return;
   }
 
-  // Application : le cache d'abord, pour un demarrage instantane hors ligne.
+  // Application : le reseau d'abord, le cache en secours hors ligne.
   evt.respondWith(
-    caches.match(requete).then(
-      (cache) =>
-        cache ??
-        fetch(requete).catch(() =>
-          requete.mode === 'navigate' ? caches.match('./index.html') : Response.error(),
-        ),
-    ),
+    fetch(requete)
+      .then((reponse) => {
+        if (reponse.ok) {
+          const copie = reponse.clone();
+          caches.open(CACHE).then((cache) => cache.put(requete, copie));
+        }
+        return reponse;
+      })
+      .catch(async () => {
+        const cache = await caches.match(requete);
+        if (cache) return cache;
+        if (requete.mode === 'navigate') return caches.match('./index.html');
+        return Response.error();
+      }),
   );
 });

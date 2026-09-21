@@ -6,6 +6,28 @@
 
 import { versIsbn13, versIsbn10 } from './isbn.js';
 
+// Le catalogue de la BnF repond couramment en 3 secondes, parfois bien plus
+// depuis un telephone. Sans plafond, l'ecran de recherche resterait fige sans
+// que l'utilisateur puisse rien faire.
+const DELAI_MAX = 8000;
+
+/** Combine le delai maximal et l'annulation demandee par l'appelant. */
+function fetchLimite(url, signal) {
+  // Un signal deja declenche doit couper court : sans ce test, une annulation
+  // survenue entre deux catalogues laisserait partir la requete suivante.
+  if (signal?.aborted) return Promise.reject(signal.reason);
+
+  const controleur = new AbortController();
+  const minuteur = setTimeout(() => controleur.abort(new Error('Délai dépassé')), DELAI_MAX);
+  const relais = () => controleur.abort(signal.reason);
+  signal?.addEventListener('abort', relais, { once: true });
+
+  return fetch(url, { signal: controleur.signal }).finally(() => {
+    clearTimeout(minuteur);
+    signal?.removeEventListener('abort', relais);
+  });
+}
+
 const texte = (valeur) => (typeof valeur === 'string' ? valeur.trim() : '');
 const entier = (valeur) => {
   const n = parseInt(valeur, 10);
@@ -14,7 +36,7 @@ const entier = (valeur) => {
 
 async function depuisOpenLibrary(isbn13, signal) {
   const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn13}&format=json&jscmd=data`;
-  const reponse = await fetch(url, { signal });
+  const reponse = await fetchLimite(url, signal);
   if (!reponse.ok) return null;
   const fiche = (await reponse.json())[`ISBN:${isbn13}`];
   if (!fiche) return null;
@@ -93,7 +115,7 @@ async function depuisBnf(isbn13, signal) {
   const url =
     'https://catalogue.bnf.fr/api/SRU?version=1.2&operation=searchRetrieve' +
     `&query=${requete}&recordSchema=dublincore&maximumRecords=1`;
-  const reponse = await fetch(url, { signal });
+  const reponse = await fetchLimite(url, signal);
   if (!reponse.ok) return null;
 
   const xml = new DOMParser().parseFromString(await reponse.text(), 'application/xml');
@@ -123,11 +145,24 @@ async function depuisBnf(isbn13, signal) {
  * Cherche un ISBN chez les fournisseurs successifs.
  * Renvoie null si aucun ne repond : l'appelant bascule alors en saisie manuelle.
  */
-export async function chercherParIsbn(saisie, { signal } = {}) {
+export async function chercherParIsbn(saisie, { signal, onEtape } = {}) {
   const isbn13 = versIsbn13(saisie);
   if (!isbn13) throw new Error("Cet ISBN n'est pas valide.");
 
-  for (const fournisseur of [depuisOpenLibrary, depuisBnf]) {
+  // Le libelle porte son elision : il est insere tel quel dans « Interrogation … ».
+  const fournisseurs = [
+    ["d'Open Library", depuisOpenLibrary],
+    ['de la BnF', depuisBnf],
+  ];
+
+  // « Aucun catalogue ne connaît ce livre » et « les catalogues sont
+  // injoignables » demandent des messages opposes : hors ligne, annoncer que
+  // le livre est inconnu serait un mensonge.
+  let echecs = 0;
+
+  for (const [nom, fournisseur] of fournisseurs) {
+    if (signal?.aborted) throw signal.reason;
+    onEtape?.(nom);
     try {
       const fiche = await fournisseur(isbn13, signal);
       if (fiche?.title) {
@@ -143,10 +178,17 @@ export async function chercherParIsbn(saisie, { signal } = {}) {
         };
       }
     } catch (err) {
-      if (err.name === 'AbortError') throw err;
-      // Un fournisseur injoignable ne doit pas empecher d'essayer le suivant.
-      console.warn('Fournisseur indisponible', err);
+      // Une annulation demandee par l'utilisateur arrete tout ; un simple
+      // depassement de delai ne doit pas empecher d'essayer le suivant.
+      if (signal?.aborted) throw err;
+      echecs += 1;
+      console.warn(`Catalogue ${nom} indisponible`, err);
     }
   }
+
+  // Un catalogue muet ne permet pas d'affirmer que le livre est inconnu : la
+  // BnF est la seule a couvrir serieusement le fonds francophone.
+  if (echecs === fournisseurs.length) throw new Error('CATALOGUES_INJOIGNABLES');
+  if (echecs > 0) throw new Error('CATALOGUE_PARTIEL');
   return null;
 }

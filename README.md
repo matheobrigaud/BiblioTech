@@ -71,8 +71,11 @@ requis pour le service worker et l'accès à la caméra.
 Pour installer sur Android : ouvrir l'URL dans Chrome, puis « Installer
 l'application ». Sur iPhone : Partager → « Sur l'écran d'accueil ».
 
-**À chaque déploiement, incrémenter `CACHE` dans `sw.js`**, sinon les téléphones
-qui ont déjà installé l'application resteront sur l'ancienne version.
+Le service worker interroge le réseau avant le cache pour les fichiers de
+l'application : un téléphone connecté reçoit donc toujours la dernière version,
+et le cache ne sert que hors ligne. Incrémenter `CACHE` dans `sw.js` reste utile
+pour purger l'ancien cache d'un coup, mais ce n'est plus ce qui empêche de
+rester bloqué sur du code périmé.
 
 ## Feuille de route
 

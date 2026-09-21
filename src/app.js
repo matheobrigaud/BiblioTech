@@ -274,18 +274,64 @@ async function rechercher(code) {
   const connu = etat.livres.find((l) => l.isbn13 && l.isbn13 === isbn13);
   if (connu) return panneauDoublon(connu);
 
-  ouvrirPanneau(`<h2>Recherche…</h2><p class="note">${echapper(formater(code))}</p>`);
+  // Les catalogues mettent couramment plusieurs secondes a repondre. L'ecran
+  // doit donc nommer celui qu'il interroge et rester quittable, sans quoi
+  // l'attente passe pour une panne.
+  const annulation = new AbortController();
+  ouvrirPanneau(
+    `<h2>Recherche…</h2>
+     <p class="note">${echapper(formater(code))}</p>
+     <p class="note" id="etape">Connexion aux catalogues…</p>
+     <div class="actions">
+       <button class="secondaire" data-action="annuler">Annuler</button>
+       <button class="primaire" data-action="manuel">Saisir à la main</button>
+     </div>`,
+    (panneau) => {
+      const abandonner = () =>
+        annulation.abort(new DOMException('Recherche quittée', 'AbortError'));
+
+      // L'annulation est explicite : se reposer sur l'evenement « close » du
+      // dialogue, qui est asynchrone, laissait la recherche aboutir et rouvrir
+      // une fiche apres coup.
+      panneau.querySelector('[data-action="annuler"]').addEventListener('click', () => {
+        abandonner();
+        fermer();
+      });
+      panneau.querySelector('[data-action="manuel"]').addEventListener('click', () => {
+        abandonner();
+        panneauFiche(nouveauLivre({ isbn13: versIsbn13(code), source: 'manuel' }));
+      });
+      // Fermeture par la touche Echap.
+      return abandonner;
+    },
+  );
+
+  const afficherEtape = (nom) => {
+    const zone = modale.querySelector('#etape');
+    if (zone) zone.textContent = `Interrogation ${nom}…`;
+  };
+
+  let fiche;
   try {
-    const fiche = await chercherParIsbn(code);
-    panneauFiche(
-      fiche
-        ? nouveauLivre(fiche)
-        : nouveauLivre({ isbn13: versIsbn13(code), source: 'manuel' }),
-      fiche ? null : "Aucun catalogue ne connaît cet ISBN. Complète la fiche à la main.",
-    );
+    fiche = await chercherParIsbn(code, { signal: annulation.signal, onEtape: afficherEtape });
   } catch (err) {
-    panneauFiche(nouveauLivre({ isbn13: versIsbn13(code) }), `Recherche impossible : ${err.message}`);
+    if (annulation.signal.aborted) return; // l'utilisateur est deja parti
+    return panneauFiche(
+      nouveauLivre({ isbn13: versIsbn13(code) }),
+      {
+        CATALOGUES_INJOIGNABLES:
+          "Les catalogues sont injoignables — vérifie ta connexion. Tu peux quand même saisir la fiche, l'ISBN est conservé.",
+        CATALOGUE_PARTIEL:
+          "Un catalogue n'a pas répondu : impossible de dire si ce livre y figure. Réessaie plus tard ou complète la fiche à la main.",
+      }[err.message] ?? `Recherche impossible : ${err.message}`,
+    );
   }
+
+  if (annulation.signal.aborted) return;
+  panneauFiche(
+    fiche ? nouveauLivre(fiche) : nouveauLivre({ isbn13: versIsbn13(code), source: 'manuel' }),
+    fiche ? null : "Aucun catalogue ne connaît cet ISBN. Complète la fiche à la main.",
+  );
 }
 
 // --- Ajout : fiche puis parcours ----------------------------------------
