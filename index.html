@@ -18,6 +18,16 @@
 
     <nav class="filtres" id="filtres" aria-label="Filtrer par statut"></nav>
 
+    <div class="barre">
+      <input id="recherche" type="search" placeholder="Titre ou auteur…" aria-label="Rechercher" />
+      <select id="tri" aria-label="Trier la liste">
+        <option value="recent">Récent</option>
+        <option value="titre">Titre</option>
+        <option value="auteur">Auteur</option>
+        <option value="note">Note</option>
+      </select>
+    </div>
+
     <main id="vue" class="vue"></main>
 
     <button id="btn-ajouter" class="flottant" aria-label="Ajouter un livre">+</button>

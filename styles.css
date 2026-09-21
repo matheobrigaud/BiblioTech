@@ -84,6 +84,24 @@ body {
   color: #fff;
 }
 
+/* Recherche et tri -------------------------------------------------------- */
+
+.barre {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0 1rem 0.75rem;
+}
+
+.barre input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.barre select {
+  flex: 0 0 auto;
+  width: auto;
+}
+
 /* Liste ------------------------------------------------------------------ */
 
 .vue { padding: 0 1rem; }

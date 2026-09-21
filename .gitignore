@@ -4,3 +4,6 @@ desktop.ini
 *.log
 .vscode/
 .idea/
+
+# Clone egare a l'interieur du projet : a supprimer
+/BiblioTech/

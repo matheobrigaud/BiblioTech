@@ -16,7 +16,14 @@ import {
 const $ = (sel) => document.querySelector(sel);
 const modale = $('#modale');
 
-let etat = { livres: [], exemplaires: [], lectures: [], filtre: 'tous' };
+let etat = {
+  livres: [],
+  exemplaires: [],
+  lectures: [],
+  filtre: 'tous',
+  recherche: '',
+  tri: 'recent',
+};
 
 // --- Rendu ---------------------------------------------------------------
 
@@ -83,19 +90,61 @@ function dessinerFiltres() {
     .join('');
 }
 
+/** Chercher « etranger » doit trouver « L'Étranger ». */
+const aplatir = (texte) =>
+  String(texte ?? '')
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase();
+
+/** Classement bibliotheconomique : Émile Zola se range a Z. */
+const patronyme = (livre) => aplatir(livre.authors[0] ?? '').split(/\s+/).pop() ?? '';
+
+/** De meme, « L'Étranger » se range a E : l'article initial ne compte pas. */
+const cleDeTitre = (titre) =>
+  aplatir(titre).replace(/^(l'|les?\s|la\s|un\s|une\s|des\s|du\s|the\s|an?\s)/, '');
+
+const TRIS = {
+  recent: (a, b) => b.exemplaire.updatedAt.localeCompare(a.exemplaire.updatedAt),
+  titre: (a, b) => cleDeTitre(a.livre.title).localeCompare(cleDeTitre(b.livre.title)),
+  auteur: (a, b) =>
+    patronyme(a.livre).localeCompare(patronyme(b.livre)) ||
+    cleDeTitre(a.livre.title).localeCompare(cleDeTitre(b.livre.title)),
+  note: (a, b) => (noteDe(b.livre) ?? -1) - (noteDe(a.livre) ?? -1),
+};
+
+const noteDe = (livre) =>
+  etat.lectures
+    .filter((l) => l.bookId === livre.id && l.rating)
+    .sort((x, y) => y.createdAt.localeCompare(x.createdAt))[0]?.rating ?? null;
+
 function dessiner() {
   dessinerFiltres();
 
+  const quete = aplatir(etat.recherche);
   const visibles = etat.exemplaires
     .filter((e) => etat.filtre === 'tous' || e.status === etat.filtre)
     .map((e) => ({ exemplaire: e, livre: etat.livres.find((l) => l.id === e.bookId) }))
     .filter((x) => x.livre)
-    .sort((a, b) => b.exemplaire.updatedAt.localeCompare(a.exemplaire.updatedAt));
+    .filter(
+      (x) =>
+        !quete ||
+        aplatir(x.livre.title).includes(quete) ||
+        aplatir(x.livre.authors.join(' ')).includes(quete),
+    )
+    .sort(TRIS[etat.tri] ?? TRIS.recent);
 
   if (!visibles.length) {
+    const cause = quete ? 'recherche' : etat.exemplaires.length ? 'filtre' : 'vide';
     $('#vue').innerHTML = `<div class="vide">
-      <strong>${etat.exemplaires.length ? 'Rien dans ce rayon' : 'Bibliothèque vide'}</strong>
-      ${etat.exemplaires.length ? 'Essaie un autre filtre.' : 'Appuie sur + pour ajouter ton premier livre.'}
+      <strong>${{ recherche: 'Aucun résultat', filtre: 'Rien dans ce rayon', vide: 'Bibliothèque vide' }[cause]}</strong>
+      ${
+        {
+          recherche: 'Essaie un autre titre ou un autre auteur.',
+          filtre: 'Essaie un autre filtre.',
+          vide: 'Appuie sur + pour ajouter ton premier livre.',
+        }[cause]
+      }
     </div>`;
     return;
   }
@@ -500,7 +549,11 @@ function panneauLivre(copieId) {
               <button class="primaire" data-action="terminer">J'ai fini</button>
               <button class="secondaire" data-action="abandonner">J'abandonne</button>
             </div>`
-         : ''
+         : `<div class="actions">
+              <button class="primaire" data-action="commencer">
+                ${lectures.length ? 'Je le relis' : 'Je commence ce livre'}
+              </button>
+            </div>`
      }
 
      ${
@@ -522,7 +575,21 @@ function panneauLivre(copieId) {
        <button class="secondaire" data-action="supprimer">Supprimer ce livre</button>
      </div>`,
     (panneau) => {
+      const demarrerLecture = async (statut = 'en_cours') => {
+        await db.enregistrerEnsemble({
+          copy: { ...exemplaire, status: statut, updatedAt: new Date().toISOString() },
+          reading: lectureSuivie(livre.id),
+        });
+        await recharger();
+        panneauLivre(copieId);
+      };
+
       panneau.querySelector('#statut').addEventListener('change', async (e) => {
+        // Passer le statut a « en cours » sans creer de lecture laisserait un
+        // livre qu'on lit sans trace de cette lecture, et fausserait les
+        // recapitulatifs. Le menu sert aussi a corriger : il doit rester exact.
+        if (e.target.value === 'en_cours' && !enCours) return demarrerLecture();
+
         await db.enregistrer('copies', {
           ...exemplaire,
           status: e.target.value,
@@ -530,6 +597,12 @@ function panneauLivre(copieId) {
         });
         recharger();
       });
+
+      // Sans ce bouton, une relecture etait impossible a enregistrer — alors
+      // que le modele a trois entites existe precisement pour la porter.
+      panneau
+        .querySelector('[data-action="commencer"]')
+        ?.addEventListener('click', () => demarrerLecture());
 
       panneau.querySelector('[data-action="terminer"]')?.addEventListener('click', async () => {
         await db.enregistrer('readings', terminerLecture(enCours));
@@ -676,6 +749,16 @@ function panneauReglages() {
 
 $('#btn-ajouter').addEventListener('click', panneauAjout);
 $('#btn-reglages').addEventListener('click', panneauReglages);
+
+$('#recherche').addEventListener('input', (e) => {
+  etat.recherche = e.target.value;
+  dessiner();
+});
+
+$('#tri').addEventListener('change', (e) => {
+  etat.tri = e.target.value;
+  dessiner();
+});
 
 $('#filtres').addEventListener('click', (e) => {
   const puce = e.target.closest('[data-filtre]');
